@@ -151,7 +151,7 @@ Dockerfile                 one image with every game server; GAME picks one
 | Connected after a few "Server starting" retries | Normal: a fresh deployment needs a few seconds before it accepts connections. |
 | `ws://` blocked on an `https` page | Connect with the `wss://<fqdn>:<port>` from the matchmaker. TLS Upgrade must be on for the port. |
 | Server waits 15 s before the countdown | A matched player never connected (closed tab). With everyone in, the countdown starts at once. |
-| Test players split across servers | Old tickets from an interrupted run were still queued. Wait 5 minutes for them to expire, or restart the matchmaker. |
+| Test players split across servers | Old tickets from an interrupted run were still queued. Wait 30 seconds for them to expire, or restart the matchmaker. |
 | Deployment didn't stop | Read its logs (dashboard or `edgegap_get_deployment_logs`) for `self-stop` lines. |
 
 ## License
