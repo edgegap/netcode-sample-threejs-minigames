@@ -269,6 +269,8 @@ export async function runGame(def) {
         debug.phase = msg.phase;
         debug.players = msg.players;
         debug.result = msg.result;
+        debug.state = msg; // latest server state, for test automation
+        debug.myId = ctx.myId;
         debug.states++;
         renderHud(ui, msg, ctx.myId, def);
         game.state(msg);
