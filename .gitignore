@@ -1,0 +1,4 @@
+node_modules/
+client/config.local.js
+.e2e/
+*.log
