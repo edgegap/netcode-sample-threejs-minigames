@@ -22,14 +22,14 @@ What this sample shows:
 Verified end to end on Edgegap on 2026-10-22, see [Tests](#tests).
 
 ```
-browser ──POST /tickets {profile:"kart"}──▶ Edgegap Matchmaker ──deploys kart-v1 near the players──▶ Edgegap
-browser ◀──HOST_ASSIGNED {fqdn, ports.gameport.external}──
+browser ──@edgegap/sdk group {profile:"kart"}──▶ Edgegap Matchmaker ──deploys kart-v1 near the players──▶ Edgegap
+browser ◀──HOST_ASSIGNED {fqdn, ports.gameport}──
 browser ══wss://<id>.pr.edgegap.net:<port>══▶ Node.js game server (one per match) ──stops itself after the match
 ```
 
 ## Quick start (local, 2 minutes)
 
-Needs Node.js 20 or newer.
+Needs Node.js 22 or newer.
 
 ```bash
 npm install
