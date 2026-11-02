@@ -4,8 +4,8 @@ Each match is one Node.js process in one Edgegap deployment. The browser never r
 
 ```
                   ┌───────────── Edgegap ─────────────┐
- browser ──POST /tickets {profile:"sumo"}──▶ Matchmaker
- browser ◀─HOST_ASSIGNED {fqdn, ports.gameport.external}─┤
+ browser ──@edgegap/sdk group {profile:"sumo"}──▶ Matchmaker
+ browser ◀─HOST_ASSIGNED {fqdn, ports.gameport}──────────┤
                   │   deploys sumo-v1 near the players │
  browser ══wss://<id>.pr.edgegap.net:<port>══▶ server/main.js (GAME=sumo)
                   │                    └─ DELETE $ARBITRIUM_DELETE_URL when the match is over
@@ -18,7 +18,7 @@ Each match is one Node.js process in one Edgegap deployment. The browser never r
 |---|---|
 | [`server/main.js`](../server/main.js) | Picks the game from `GAME`, serves HTTP + WebSocket on `PORT` (7777), handles SIGTERM. |
 | [`server/room.js`](../server/room.js) | Game-agnostic match: connections, handshake, phases, fixed-rate simulation, 20 Hz state broadcast, bots, timers. |
-| [`server/edgegap.js`](../server/edgegap.js) | Reads Edgegap's `ARBITRIUM_*` and the matchmaker's `MM_*` variables; `selfStop()`. Does nothing off Edgegap. |
+| [`server/edgegap.js`](../server/edgegap.js) | Reads Edgegap's `ARBITRIUM_*` and the matchmaker's `MM_*` variables with `@edgegap/sdk` (`DeploymentEnvironment`, `MatchEnvironment`); `selfStop()`. Does nothing off Edgegap. |
 | [`server/util.js`](../server/util.js) | Input sanitising, collision helpers, result helpers. |
 | `games/<game>/server.js` | The game's rules. |
 
@@ -78,24 +78,23 @@ Edgegap injects the rest: `ARBITRIUM_REQUEST_ID`, `ARBITRIUM_PUBLIC_IP`, `ARBITR
 
 | File | Role |
 |---|---|
-| [`client/lib/shell.js`](../client/lib/shell.js) | Everything the games share: the Three.js stage, the menu (Find match, Local server, `?server=`), the HUD, input sending, name labels, entity syncing and easing helpers. |
-| [`client/lib/matchmaker.js`](../client/lib/matchmaker.js) | Ticket API client: create, poll, cancel, back off on `429`. |
+| [`client/lib/shell.js`](../client/lib/shell.js) | Everything the games share: the Three.js stage, the menu (Find match through the `@edgegap/sdk` `GroupAgent`, Local server, `?server=`), the HUD, input sending, name labels, entity syncing and easing helpers. |
 | [`client/lib/net.js`](../client/lib/net.js) | WebSocket with the `hello` handshake and connection retries. |
 | [`client/config.js`](../client/config.js) | Matchmaker URL and Auth Token. |
 | `games/<game>/client.js` | Builds the level from `welcome.info`, draws snapshots, reads the keyboard and mouse. |
 
-No build step: each page loads Three.js 0.170 from jsDelivr through an import map, and everything else is plain ES modules.
+No build step: each page loads Three.js 0.170 and the browser build of `@edgegap/sdk` 1.1.0 (pinned with an integrity hash) from jsDelivr through an import map, and everything else is plain ES modules. Keep the import map's SDK version in step with `package.json`.
 
 Rendering: snapshots arrive 20 times a second, and each object eases toward its latest server position every frame (`smooth(dt)` = `1 - e^(-14·dt)`). Respawns and kickoffs snap instead. That adds roughly 50–100 ms of visual delay, which is fine for these games, and needs no client-side prediction.
 
 ### Find match
 
-1. `POST /tickets {profile: "<game>", attributes: {}}` with header `Authorization: <matchmaker auth token>`.
-2. Poll `GET /tickets/{id}` every 1.5 s: `SEARCHING` → `MATCH_FOUND` (a server is starting) → `HOST_ASSIGNED` with `assignment.fqdn` and `assignment.ports.gameport.external`.
-3. Connect to `wss://<fqdn>:<external>`. The port has TLS Upgrade, so the page can be `https`, and the FQDN matches the certificate.
+1. `GroupAgent.createGroup({profile: "<game>", attributes: {}, is_ready: true})`: a group of one player, ready at once, authorized with the matchmaker auth token.
+2. The agent polls the group: `SEARCHING` → `MATCH_FOUND` (a server is starting) → `HOST_ASSIGNED`, and `nextAssignment()` resolves with the assignment. The player's `ticket_id` is sent in `hello`.
+3. Connect to `getConnectionUrl(assignment, "gameport")` = `wss://<fqdn>:<external>`. The port has TLS Upgrade, so the page can be `https`, and the FQDN matches the certificate.
 4. A fresh deployment can refuse the first connections for a few seconds, so `net.js` retries 10 times, 1 s apart.
 
-Cancel sends `DELETE /tickets/{id}` (also on tab close). A `429` from the matchmaker means too many calls at once, so the client waits 1, 2, 4, then 8 s and retries.
+Cancel calls `stopMatchmaking()`, which deletes the group (also on tab close). The SDK retries `429`, `5xx` and network errors with jittered backoff.
 
 ## Matchmaker
 

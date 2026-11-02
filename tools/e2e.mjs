@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // End-to-end test through the Edgegap matchmaker, the same path the browser clients take:
-// tickets -> HOST_ASSIGNED -> wss to the deployment -> full match -> server stops itself.
+// @edgegap/sdk group -> HOST_ASSIGNED -> wss to the deployment -> full match -> server stops itself.
 //
 //   MM_URL=https://<id>.edgegap.net MM_TOKEN=<matchmaker auth token> node tools/e2e.mjs [game ...]
 //
 // Uses the matchmaker's client token only (never the Edgegap API token). Each game queues
 // several headless players at once and checks they all land on the same deployment.
 
+import { getConnectionUrl } from "@edgegap/sdk";
+import { GroupAgent } from "@edgegap/sdk/matchmaking";
 import { playSession } from "./lib/bot.mjs";
 
-const URL_ = (process.env.MM_URL ?? "").replace(/\/+$/, "");
+const URL_ = process.env.MM_URL;
 const TOKEN = process.env.MM_TOKEN;
 if (!URL_ || !TOKEN) {
   console.error("Set MM_URL and MM_TOKEN (matchmaker API URL and Auth Token).");
@@ -18,50 +20,18 @@ if (!URL_ || !TOKEN) {
 const PLAYERS = { blaster: 3, kart: 2, soccer: 4, cycles: 2, sumo: 3 };
 const games = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(PLAYERS);
 
-let rateLimited = 0;
-async function mm(method, path, body) {
-  // Same backoff as client/lib/matchmaker.js: the matchmaker answers 429 to bursts.
-  for (let attempt = 0; ; attempt++) {
-    let res;
-    try {
-      res = await fetch(URL_ + path, {
-        method,
-        headers: { Authorization: TOKEN, ...(body ? { "Content-Type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(15000),
-      });
-    } catch (err) {
-      // Transient network error (DNS, reset): retry a few times like a 429.
-      if (attempt < 4) {
-        await new Promise((r) => setTimeout(r, 2000));
-        continue;
-      }
-      throw err;
-    }
-    if (res.status === 429 && attempt < 8) {
-      rateLimited++;
-      await new Promise((r) => setTimeout(r, 1000 * 2 ** Math.min(attempt, 3) + Math.random() * 500));
-      continue;
-    }
-    if (!res.ok) throw new Error(`${method} ${path}: HTTP ${res.status} ${await res.text()}`);
-    return res.json();
-  }
-}
-
 async function queue(game, name, log) {
   const t0 = Date.now();
-  const ticket = await mm("POST", "/tickets", { profile: game, attributes: {} });
-  let status = "";
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const t = await mm("GET", `/tickets/${ticket.id}`);
-    if (t.status !== status) log(`${name}: ${t.status} after ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-    status = t.status;
-    if (t.status === "HOST_ASSIGNED") {
-      const a = t.assignment;
-      return { ticketId: ticket.id, fqdn: a.fqdn, url: `wss://${a.fqdn}:${a.ports.gameport.external}`, waited: (Date.now() - t0) / 1000 };
-    }
-    if (t.status === "CANCELLED") throw new Error(`${name}: ticket cancelled`);
+  const agent = new GroupAgent({ baseUrl: URL_, authToken: TOKEN, requestTimeoutSeconds: 15, pollingBackoffSeconds: 2, logGroupUpdates: false });
+  agent.initialize(undefined, (_group, _type, _message, event) => {
+    if (event.code === "updated") log(`${name}: ${event.status} after ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  });
+  agent.createGroup({ profile: game, attributes: {}, is_ready: true }, true);
+  try {
+    const assignment = await agent.nextAssignment();
+    return { ticketId: agent.group.current.ticket_id, fqdn: assignment.fqdn, url: getConnectionUrl(assignment, "gameport"), waited: (Date.now() - t0) / 1000 };
+  } finally {
+    agent.dispose();
   }
 }
 
@@ -124,6 +94,5 @@ const results = await Promise.all(
     new Promise((r) => setTimeout(r, i * 8000)).then(() => testGame(g)).catch((e) => (console.log(`FAIL ${g}: ${e.message}`), false))
   )
 );
-if (rateLimited) console.log(`(matchmaker answered 429 ${rateLimited} time(s); retried)`);
 console.log(results.every(Boolean) ? "\nALL PASSED" : "\nSOME FAILED");
 process.exit(results.every(Boolean) ? 0 : 1);
